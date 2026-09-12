@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Review Engineering</title>
+  <desc id="desc">A review conversation bubble with a checkmark</desc>
+  <rect width="256" height="256" rx="70" fill="#173f5f"/>
+  <path d="M66 60h124c14.4 0 26 11.6 26 26v74c0 14.4-11.6 26-26 26h-67l-39 30v-30H66c-14.4 0-26-11.6-26-26V86c0-14.4 11.6-26 26-26Z" fill="none" stroke="#fff" stroke-width="17" stroke-linejoin="round"/>
+  <path d="m84 124 27 27 61-64" fill="none" stroke="#79b8ff" stroke-width="19" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

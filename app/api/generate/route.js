@@ -16,29 +16,38 @@ const schema = {
   }
 };
 
-const instructions = `You create client-friendly review requests for real estate agents.
+const instructions = `You create client-friendly review requests for real estate agents. The writing must sound like a real person wrote it, not a transaction summary or marketing template.
 
 Use only the transaction details supplied. Never invent a fact, quote, feeling, result, name, or action.
 
 Write directly to the client in second person using "you" and "your," even when the agent's notes use "they," "their," or "the client."
 
 EMAIL RULES:
-- Write a warm, natural email tied to this client's real experience.
-- Include a useful subject line.
+- Start with "Subject:" on its own line, then write the email.
+- Greet the client by the supplied first name or names. If none are supplied, use "Hi there," and never show a placeholder.
+- Write a warm, natural email tied to the client's real experience.
+- Mention no more than two meaningful transaction details. Do not recap the entire transaction or create a list of concerns.
+- Use ordinary spoken language, short sentences, and contractions where natural.
+- Keep the complete email between 90 and 140 words.
+- Include the supplied review link exactly once.
+- Sign off with the supplied agent first name. Never show a placeholder.
 - Do not ask for a five-star review, praise, or positive feedback.
 - Frame the review as something that may help future buyers or sellers in a similar situation.
-- Keep it short and human. Avoid marketing clichés and exaggerated language.
+- Avoid stiff phrases such as "your perspective," "share insights," "in today's market," and "when you have a few minutes."
+- Do not say "I hope this message finds you well."
 
 MEMORY PROMPT RULES:
 - Return exactly three prompts.
 - Every prompt must begin exactly: "If it helps, you could mention…"
 - Ground each prompt in a specific concern, obstacle, solution, turning point, feeling, or outcome from the supplied transaction.
+- Keep each prompt to one short sentence and focus on one idea.
 - Do not script the review or put praise in the client's mouth.
 
 FOLLOW-UP TEXT RULES:
-- Write a short, friendly, low-pressure next-day text.
+- Greet the client by first name when supplied.
+- Write a short, friendly, low-pressure next-day text of no more than 45 words.
 - Refer to the email sent the previous day.
-- Include the supplied review link exactly once when one is supplied.
+- Include the supplied review link exactly once.
 - Do not ask for five stars or praise.`;
 
 export async function POST(request) {
@@ -56,9 +65,18 @@ export async function POST(request) {
       return Response.json({ error: "One or more answers are too long." }, { status: 400 });
     }
 
-    const reviewLink = typeof body.reviewLink === "string" ? body.reviewLink.trim() : "";
-    if (reviewLink.length > 500) {
-      return Response.json({ error: "The review link is too long." }, { status: 400 });
+    const profile = body?.profile || {};
+    const reviewLink = typeof profile.reviewLink === "string" ? profile.reviewLink.trim() : "";
+    const agentName = typeof profile.agentName === "string" ? profile.agentName.trim() : "";
+    const clientNames = typeof profile.clientNames === "string" ? profile.clientNames.trim() : "";
+    const tone = typeof profile.tone === "string" ? profile.tone.trim() : "Warm and conversational";
+    let parsedLink;
+    try { parsedLink = new URL(reviewLink); } catch { parsedLink = null; }
+    if (!parsedLink || !["http:", "https:"].includes(parsedLink.protocol) || reviewLink.length > 500) {
+      return Response.json({ error: "Please enter a valid review link." }, { status: 400 });
+    }
+    if (!agentName || agentName.length > 80 || clientNames.length > 120 || tone.length > 60) {
+      return Response.json({ error: "Please check the setup details." }, { status: 400 });
     }
 
     const apiResponse = await fetch("https://api.openai.com/v1/responses", {
@@ -70,7 +88,7 @@ export async function POST(request) {
       body: JSON.stringify({
         model: process.env.OPENAI_MODEL || "gpt-5.5",
         instructions,
-        input: JSON.stringify({ transaction: answers, reviewLink }),
+        input: JSON.stringify({ transaction: answers, agentName, clientNames: clientNames || null, reviewLink, requestedTone: tone }),
         max_output_tokens: 1400,
         text: {
           format: {

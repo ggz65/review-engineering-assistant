@@ -4,7 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getSupabaseBrowserClient } from "../../lib/supabase";
 
-const emptyProfile = { slug:"", full_name:"", company_name:"", title:"Loan Officer", email:"", phone:"", nmls:"", website:"", welcome_message:"", brand_color:"#173f5f", headshot_url:"", logo_url:"", published:true };
+const PROFILE_FIELDS = "user_id,slug,full_name,company_name,title,email,phone,nmls,website,brand_color,headshot_url,logo_url,published";
+const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
+const IMAGE_TYPES = {
+  headshot: new Set(["image/png", "image/jpeg", "image/webp"]),
+  logo: new Set(["image/png", "image/jpeg", "image/webp", "image/svg+xml"])
+};
+const IMAGE_EXTENSIONS = { "image/png":"png", "image/jpeg":"jpg", "image/webp":"webp", "image/svg+xml":"svg" };
+const emptyProfile = { slug:"", full_name:"", company_name:"", title:"Loan Officer", email:"", phone:"", nmls:"", website:"", brand_color:"#173f5f", headshot_url:"", logo_url:"", published:true };
 const metricNames = { page_view:"Visits", interview_started:"Started", interview_completed:"Completed", generation_completed:"Generated", copy_email:"Email copies", copy_prompts:"Prompt copies", copy_text:"Text copies", open_email:"Opened email", open_text:"Opened text" };
 
 function safeSlug(value){return value.toLowerCase().trim().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,60)}
@@ -12,17 +19,19 @@ function safeSlug(value){return value.toLowerCase().trim().replace(/[^a-z0-9]+/g
 export default function DashboardPage(){
   const router=useRouter();
   const [supabase,setSupabase]=useState(null),[user,setUser]=useState(null),[profile,setProfile]=useState(emptyProfile),[campaigns,setCampaigns]=useState([]),[events,setEvents]=useState([]);
-  const [tab,setTab]=useState("overview"),[message,setMessage]=useState(""),[busy,setBusy]=useState(false),[campaignLabel,setCampaignLabel]=useState("");
+  const [tab,setTab]=useState("overview"),[message,setMessage]=useState(""),[messageKind,setMessageKind]=useState("success"),[busy,setBusy]=useState(false),[campaignLabel,setCampaignLabel]=useState("");
 
-  useEffect(()=>{let active=true;try{const client=getSupabaseBrowserClient();setSupabase(client);client.auth.getSession().then(async({data})=>{if(!active)return;if(!data.session){router.replace("/login");return}setUser(data.session.user);await load(client,data.session.user)});}catch(error){setMessage(error.message)}return()=>{active=false}},[router]);
+  function showMessage(text,kind="success"){setMessage(text);setMessageKind(kind)}
+
+  useEffect(()=>{let active=true;try{const client=getSupabaseBrowserClient();setSupabase(client);client.auth.getSession().then(async({data})=>{if(!active)return;if(!data.session){router.replace("/login");return}setUser(data.session.user);await load(client,data.session.user)});}catch(error){showMessage(error.message,"error")}return()=>{active=false}},[router]);
 
   async function load(client,currentUser){
     const [{data:p,error:pe},{data:c,error:ce},{data:e,error:ee}]=await Promise.all([
-      client.from("profiles").select("*").eq("user_id",currentUser.id).maybeSingle(),
+      client.from("profiles").select(PROFILE_FIELDS).eq("user_id",currentUser.id).maybeSingle(),
       client.from("campaigns").select("*").order("created_at",{ascending:false}),
       client.from("analytics_events").select("event_type,campaign_id,created_at").gte("created_at",new Date(Date.now()-30*86400000).toISOString())
     ]);
-    if(pe||ce||ee) setMessage((pe||ce||ee).message);
+    if(pe||ce||ee) showMessage((pe||ce||ee).message,"error");
     setProfile(p||{...emptyProfile,email:currentUser.email||""});setCampaigns(c||[]);setEvents(e||[]);
   }
 
@@ -30,18 +39,37 @@ export default function DashboardPage(){
   const baseUrl=typeof window!=="undefined"?window.location.origin:"";
   const publicUrl=profile.slug?`${baseUrl}/l/${profile.slug}`:"Complete your profile to create your link";
 
-  async function saveProfile(event){event.preventDefault();setBusy(true);setMessage("");try{const payload={...profile,user_id:user.id,slug:safeSlug(profile.slug||profile.full_name),updated_at:new Date().toISOString()};const{data,error}=await supabase.from("profiles").upsert(payload,{onConflict:"user_id"}).select().single();if(error)throw error;setProfile(data);setMessage("Profile saved.")}catch(error){setMessage(error.message)}finally{setBusy(false)}}
-  async function uploadAsset(file,kind){if(!file)return;setBusy(true);try{const ext=file.name.split(".").pop().toLowerCase();const path=`${user.id}/${kind}-${Date.now()}.${ext}`;const{error}=await supabase.storage.from("branding").upload(path,file,{upsert:false});if(error)throw error;const{data}=supabase.storage.from("branding").getPublicUrl(path);setProfile(p=>({...p,[`${kind}_url`]:data.publicUrl}));setMessage(`${kind==="logo"?"Logo":"Headshot"} uploaded. Click Save profile to publish it.`)}catch(error){setMessage(error.message)}finally{setBusy(false)}}
-  async function addCampaign(event){event.preventDefault();if(!campaignLabel.trim()||!profile.user_id)return;setBusy(true);try{const slug=safeSlug(campaignLabel);const{data,error}=await supabase.from("campaigns").insert({profile_id:profile.user_id,label:campaignLabel.trim(),slug}).select().single();if(error)throw error;setCampaigns(c=>[data,...c]);setCampaignLabel("");setMessage("Tracking link created.")}catch(error){setMessage(error.message)}finally{setBusy(false)}}
-  async function deleteCampaign(id){if(!confirm("Delete this tracking link? Existing visits will remain in your totals."))return;const{error}=await supabase.from("campaigns").delete().eq("id",id);if(error)setMessage(error.message);else setCampaigns(c=>c.filter(x=>x.id!==id))}
-  async function copy(value){await navigator.clipboard.writeText(value);setMessage("Link copied.")}
+  function profilePayload(source){return {user_id:user.id,slug:safeSlug(source.slug||source.full_name),full_name:source.full_name.trim(),company_name:source.company_name.trim(),title:(source.title||"Loan Officer").trim(),email:(source.email||"").trim()||null,phone:(source.phone||"").trim()||null,nmls:source.nmls.trim(),website:(source.website||"").trim()||null,brand_color:source.brand_color||"#173f5f",headshot_url:source.headshot_url||null,logo_url:source.logo_url||null,published:true,updated_at:new Date().toISOString()}}
+  function missingProfileField(source){return [["full name",source.full_name],["public URL name",safeSlug(source.slug||source.full_name)],["company",source.company_name],["NMLS number",source.nmls]].find(([,value])=>!String(value||"").trim())?.[0]}
+  async function persistProfile(source){const{data,error}=await supabase.from("profiles").upsert(profilePayload(source),{onConflict:"user_id"}).select(PROFILE_FIELDS).single();if(error)throw error;return data}
+  async function saveProfile(event){event.preventDefault();setBusy(true);setMessage("");try{const data=await persistProfile(profile);setProfile(data);showMessage("Profile saved and published.")}catch(error){showMessage(error.message,"error")}finally{setBusy(false)}}
+  async function uploadAsset(file,kind){
+    if(!file)return;
+    const label=kind==="logo"?"Logo":"Headshot";
+    if(file.size>MAX_IMAGE_SIZE){showMessage(`${label} must be 5 MB or smaller. Choose a smaller image and try again.`,"error");return}
+    if(!IMAGE_TYPES[kind].has(file.type)){const formats=kind==="logo"?"PNG, JPG, WebP, or SVG":"PNG, JPG, or WebP";showMessage(`${label} must be a supported image (${formats}).`,"error");return}
+    const missing=missingProfileField(profile);
+    if(missing){showMessage(`Complete the ${missing} field before uploading so the image can be published automatically.`,"error");return}
+    setBusy(true);setMessage("");
+    try{
+      const path=`${user.id}/${kind}-${Date.now()}.${IMAGE_EXTENSIONS[file.type]}`;
+      const{error:uploadError}=await supabase.storage.from("branding").upload(path,file,{contentType:file.type,upsert:false});
+      if(uploadError)throw uploadError;
+      const{data}=supabase.storage.from("branding").getPublicUrl(path);
+      const saved=await persistProfile({...profile,[`${kind}_url`]:data.publicUrl,published:true});
+      setProfile(saved);showMessage(`${label} uploaded and published.`);
+    }catch(error){showMessage(`${label} could not be uploaded: ${error.message}`,"error")}finally{setBusy(false)}
+  }
+  async function addCampaign(event){event.preventDefault();if(!campaignLabel.trim()||!profile.user_id)return;setBusy(true);try{const slug=safeSlug(campaignLabel);const{data,error}=await supabase.from("campaigns").insert({profile_id:profile.user_id,label:campaignLabel.trim(),slug}).select().single();if(error)throw error;setCampaigns(c=>[data,...c]);setCampaignLabel("");showMessage("Tracking link created.")}catch(error){showMessage(error.message,"error")}finally{setBusy(false)}}
+  async function deleteCampaign(id){if(!confirm("Delete this tracking link? Existing visits will remain in your totals."))return;const{error}=await supabase.from("campaigns").delete().eq("id",id);if(error)showMessage(error.message,"error");else setCampaigns(c=>c.filter(x=>x.id!==id))}
+  async function copy(value){await navigator.clipboard.writeText(value);showMessage("Link copied.")}
   async function signOut(){await supabase.auth.signOut();router.replace("/login")}
 
   if(!user)return <main className="admin-shell"><p className="admin-muted">Loading your dashboard…</p></main>;
   return <main className="admin-shell">
     <header className="admin-header"><div className="admin-brand"><img src="/review-engineering-logo.svg" alt="" className="admin-logo"/><div><strong>Review Engineering</strong><span>Loan Officer Dashboard</span></div></div><button className="admin-secondary" onClick={signOut}>Sign out</button></header>
     <nav className="admin-tabs"><button className={tab==="overview"?"active":""} onClick={()=>setTab("overview")}>Overview</button><button className={tab==="profile"?"active":""} onClick={()=>setTab("profile")}>Branding</button><button className={tab==="links"?"active":""} onClick={()=>setTab("links")}>Tracking links</button></nav>
-    {message&&<div className="admin-notice">{message}</div>}
+    {message&&<div className={`admin-notice ${messageKind==="error"?"error":""}`} role={messageKind==="error"?"alert":"status"}>{message}</div>}
     {tab==="overview"&&<section>
       <div className="admin-title"><div><p className="eyebrow">LAST 30 DAYS</p><h1>Your activity</h1></div>{profile.slug&&<button className="admin-primary" onClick={()=>copy(publicUrl)}>Copy public link</button>}</div>
       <div className="metric-grid">{["page_view","interview_started","interview_completed","generation_completed"].map(key=><article className="metric" key={key}><strong>{metrics[key]||0}</strong><span>{metricNames[key]}</span></article>)}</div>
@@ -60,9 +88,8 @@ export default function DashboardPage(){
         <label>NMLS number<input value={profile.nmls||""} onChange={e=>setProfile({...profile,nmls:e.target.value})} required/></label>
         <label>Website<input type="url" value={profile.website||""} onChange={e=>setProfile({...profile,website:e.target.value})}/></label>
         <label>Brand color<input type="color" value={profile.brand_color||"#173f5f"} onChange={e=>setProfile({...profile,brand_color:e.target.value})}/></label>
-        <label className="wide">Welcome message<textarea value={profile.welcome_message||""} onChange={e=>setProfile({...profile,welcome_message:e.target.value})} maxLength="220" placeholder="Helping agents create better client reviews and stronger online visibility."/></label>
-        <label>Headshot<input type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>uploadAsset(e.target.files[0],"headshot")}/>{profile.headshot_url&&<img className="asset-preview portrait" src={profile.headshot_url} alt="Headshot preview"/>}</label>
-        <label>Company logo<input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={e=>uploadAsset(e.target.files[0],"logo")}/>{profile.logo_url&&<img className="asset-preview" src={profile.logo_url} alt="Logo preview"/>}</label>
+        <label>Headshot<input type="file" accept="image/png,image/jpeg,image/webp" disabled={busy} onChange={async e=>{const input=e.currentTarget;await uploadAsset(input.files[0],"headshot");input.value=""}}/><small>PNG, JPG, or WebP. Maximum 5 MB. Uploads publish automatically.</small>{profile.headshot_url&&<img className="asset-preview portrait" src={profile.headshot_url} alt="Headshot preview"/>}</label>
+        <label>Company logo<input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" disabled={busy} onChange={async e=>{const input=e.currentTarget;await uploadAsset(input.files[0],"logo");input.value=""}}/><small>PNG, JPG, WebP, or SVG. Maximum 5 MB. Uploads publish automatically.</small>{profile.logo_url&&<img className="asset-preview" src={profile.logo_url} alt="Logo preview"/>}</label>
       </div>
       <button className="admin-primary" disabled={busy}>{busy?"Saving…":"Save profile"}</button>
     </form>}

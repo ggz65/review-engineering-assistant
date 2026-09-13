@@ -59,8 +59,8 @@ create policy "Anyone records approved events" on public.analytics_events for in
 create policy "Owners read their analytics" on public.analytics_events for select using (auth.uid()=profile_id);
 
 insert into storage.buckets (id,name,public,file_size_limit,allowed_mime_types)
-values ('branding','branding',true,5242880,array['image/png','image/jpeg','image/webp','image/svg+xml'])
-on conflict (id) do update set public=true,file_size_limit=5242880,allowed_mime_types=excluded.allowed_mime_types;
+values ('branding','branding',true,10485760,array['image/png','image/jpeg','image/webp','image/svg+xml'])
+on conflict (id) do update set public=true,file_size_limit=10485760,allowed_mime_types=excluded.allowed_mime_types;
 
 create policy "Public reads branding" on storage.objects for select using (bucket_id='branding');
 create policy "Users upload own branding" on storage.objects for insert with check (bucket_id='branding' and (storage.foldername(name))[1]=auth.uid()::text);

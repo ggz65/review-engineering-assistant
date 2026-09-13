@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { getSupabaseBrowserClient } from "../../lib/supabase";
 
 const PROFILE_FIELDS = "user_id,slug,full_name,company_name,title,email,phone,nmls,website,brand_color,headshot_url,logo_url,published";
-const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
+const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
 const IMAGE_TYPES = {
   headshot: new Set(["image/png", "image/jpeg", "image/webp"]),
   logo: new Set(["image/png", "image/jpeg", "image/webp", "image/svg+xml"])
@@ -46,7 +46,7 @@ export default function DashboardPage(){
   async function uploadAsset(file,kind){
     if(!file)return;
     const label=kind==="logo"?"Logo":"Headshot";
-    if(file.size>MAX_IMAGE_SIZE){showMessage(`${label} must be 5 MB or smaller. Choose a smaller image and try again.`,"error");return}
+    if(file.size>MAX_IMAGE_SIZE){showMessage(`${label} must be 10 MB or smaller. Choose a smaller image and try again.`,"error");return}
     if(!IMAGE_TYPES[kind].has(file.type)){const formats=kind==="logo"?"PNG, JPG, WebP, or SVG":"PNG, JPG, or WebP";showMessage(`${label} must be a supported image (${formats}).`,"error");return}
     const missing=missingProfileField(profile);
     if(missing){showMessage(`Complete the ${missing} field before uploading so the image can be published automatically.`,"error");return}
@@ -88,8 +88,8 @@ export default function DashboardPage(){
         <label>NMLS number<input value={profile.nmls||""} onChange={e=>setProfile({...profile,nmls:e.target.value})} required/></label>
         <label>Website<input type="url" value={profile.website||""} onChange={e=>setProfile({...profile,website:e.target.value})}/></label>
         <label>Brand color<input type="color" value={profile.brand_color||"#173f5f"} onChange={e=>setProfile({...profile,brand_color:e.target.value})}/></label>
-        <label>Headshot<input type="file" accept="image/png,image/jpeg,image/webp" disabled={busy} onChange={async e=>{const input=e.currentTarget;await uploadAsset(input.files[0],"headshot");input.value=""}}/><small>PNG, JPG, or WebP. Maximum 5 MB. Uploads publish automatically.</small>{profile.headshot_url&&<img className="asset-preview portrait" src={profile.headshot_url} alt="Headshot preview"/>}</label>
-        <label>Company logo<input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" disabled={busy} onChange={async e=>{const input=e.currentTarget;await uploadAsset(input.files[0],"logo");input.value=""}}/><small>PNG, JPG, WebP, or SVG. Maximum 5 MB. Uploads publish automatically.</small>{profile.logo_url&&<img className="asset-preview" src={profile.logo_url} alt="Logo preview"/>}</label>
+        <label>Headshot<input type="file" accept="image/png,image/jpeg,image/webp" disabled={busy} onChange={async e=>{const input=e.currentTarget;await uploadAsset(input.files[0],"headshot");input.value=""}}/><small>PNG, JPG, or WebP. Maximum 10 MB. Uploads publish automatically.</small>{profile.headshot_url&&<img className="asset-preview portrait" src={profile.headshot_url} alt="Headshot preview"/>}</label>
+        <label>Company logo<input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" disabled={busy} onChange={async e=>{const input=e.currentTarget;await uploadAsset(input.files[0],"logo");input.value=""}}/><small>PNG, JPG, WebP, or SVG. Maximum 10 MB. Uploads publish automatically.</small>{profile.logo_url&&<img className="asset-preview" src={profile.logo_url} alt="Logo preview"/>}</label>
       </div>
       <button className="admin-primary" disabled={busy}>{busy?"Saving…":"Save profile"}</button>
     </form>}

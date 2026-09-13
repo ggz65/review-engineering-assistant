@@ -1,3 +1,5 @@
+import "./dashboard.css";
+
 export const metadata = {
   title: "Review Engineering Assistant",
   description: "Turn a real client experience into a thoughtful, specific review request."
@@ -6,7 +8,7 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body style={{ margin: 0 }}>{children}</body>
     </html>
   );
 }

@@ -70,6 +70,11 @@
     const branded={profile:null,campaign:null};
     let sessionId;
     try{sessionId=localStorage.getItem('re_session_id');if(!sessionId){sessionId=crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random()}`;localStorage.setItem('re_session_id',sessionId)}}catch{sessionId=`${Date.now()}-${Math.random()}`}
+    function formatPhone(value){
+      const raw=String(value||'').trim(),digits=raw.replace(/\D/g,'');
+      const local=digits.length===11&&digits.startsWith('1')?digits.slice(1):digits;
+      return local.length===10?`${local.slice(0,3)}-${local.slice(3,6)}-${local.slice(6)}`:raw
+    }
     async function loadBranding(){
       const match=location.pathname.match(/^\/l\/([^/]+)(?:\/([^/]+))?/);if(!match)return;
       try{
@@ -81,13 +86,13 @@
         document.getElementById('sponsorCompany').textContent=[p.title,p.company_name].filter(Boolean).join(' · ');
         const nmls=document.getElementById('sponsorNmls');if(p.nmls){nmls.textContent=`NMLS #${p.nmls}`;nmls.hidden=false}
         const phone=document.getElementById('sponsorPhone'),email=document.getElementById('sponsorEmail');
-        if(p.phone){phone.textContent=p.phone;phone.href=`tel:${p.phone.replace(/[^+\d]/g,'')}`;phone.hidden=false}
+        if(p.phone){phone.textContent=formatPhone(p.phone);phone.href=`tel:${p.phone.replace(/[^+\d]/g,'')}`;phone.hidden=false}
         if(p.email){email.textContent=p.email;email.href=`mailto:${p.email}`;email.hidden=false}
         const head=document.getElementById('sponsorHeadshot'),logo=document.getElementById('sponsorLogo');
         if(p.headshot_url){head.src=p.headshot_url;head.alt=`${p.full_name} headshot`}else head.style.display='none';
         if(p.logo_url){logo.src=p.logo_url;logo.alt=p.company_name?`${p.company_name} logo`:'Company logo'}else logo.style.display='none';
         document.getElementById('sponsorCard').classList.add('show');
-        const footer=document.getElementById('sponsorFooter');footer.textContent=[p.full_name,p.company_name,p.nmls?`NMLS #${p.nmls}`:'',p.phone,p.email].filter(Boolean).join(' · ');footer.classList.add('show');track('page_view')
+        const footer=document.getElementById('sponsorFooter');footer.textContent=[p.full_name,p.company_name,p.nmls?`NMLS #${p.nmls}`:'',p.phone?formatPhone(p.phone):'',p.email].filter(Boolean).join(' · ');footer.classList.add('show');track('page_view')
       }catch(error){console.warn('Branding unavailable')}
     }
     function track(eventType){if(!branded.profile)return;fetch('/api/track',{method:'POST',headers:{'Content-Type':'application/json'},keepalive:true,body:JSON.stringify({eventType,profileId:branded.profile.user_id,campaignId:branded.campaign?.id||null,sessionId,path:location.pathname,device:navigator.userAgent})}).catch(()=>{})}

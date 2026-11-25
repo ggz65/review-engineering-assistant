@@ -111,7 +111,20 @@
     const clarified=new Set(); let step=0; let listening=false; let currentRecognition=null; let injectedLink='';
     const area=document.getElementById('questionArea'), next=document.getElementById('nextBtn'), back=document.getElementById('backBtn');
     const esc=s=>String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+    // Voice: phones, home-screen apps and in-app browsers record audio and transcribe on the server,
+    // because browser speech recognition is missing or silently fails there. Desktop keeps live recognition.
+    const isMobile=/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+    const isStandalone=(window.matchMedia&&matchMedia('(display-mode: standalone)').matches)||navigator.standalone===true;
+    const canRecord=!!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia&&window.MediaRecorder);
+    let mediaRec=null,recTimer=null,discardRecording=false;
+    function micBlockedMsg(){return /iPhone|iPad|iPod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1)?'Microphone access is off. On iPhone go to Settings → Safari → Microphone (or Settings → Privacy → Microphone) and allow it, then try again. Or type below.':'Microphone access was blocked. Allow it in your browser settings, or type below.'}
+    function cancelVoice(){
+      if(currentRecognition){const r=currentRecognition;currentRecognition=null;try{r.abort()}catch{}}
+      if(mediaRec&&mediaRec.state==='recording'){discardRecording=true;mediaRec.stop()}
+      listening=false;
+    }
     function render(){
+      cancelVoice();
       const q=questions[step],pct=Math.round((step+1)/7*100); document.getElementById('stepLabel').textContent=`Question ${step+1} of 7`;document.getElementById('percent').textContent=`${pct}% complete`;document.getElementById('progressFill').style.width=`${pct}%`;document.querySelector('.progress').setAttribute('aria-valuenow',step+1);back.disabled=step===0;next.textContent=step===6?'Create my review request':'Next';
       let control='';
       const voiceHelp=q.type==='choice'?'Tap the microphone and say buyer, seller, or both.':'Tap the microphone and talk, or type your answer below.';
@@ -123,10 +136,59 @@
     function bind(q){
       document.querySelectorAll('[data-choice]').forEach(b=>{b.setAttribute('aria-pressed',b.dataset.choice===answers.side);b.onclick=()=>{answers.side=b.dataset.choice;render()}});
       const ta=document.getElementById('answer'); if(ta)ta.oninput=e=>{answers[q.key]=e.target.value;validate()};
-      const SR=window.SpeechRecognition||window.webkitSpeechRecognition,mb=document.getElementById('micBtn');if(SR)mb.onclick=()=>listening?currentRecognition.stop():startVoice(SR,ta,q,mb);else{mb.disabled=true;document.getElementById('micLabel').textContent='Voice unavailable in this browser';document.getElementById('voiceHint').textContent=q.type==='choice'?'Choose buyer, seller, or both above.':'You can still type your answer below.'}
+      const SR=window.SpeechRecognition||window.webkitSpeechRecognition,mb=document.getElementById('micBtn');
+      const useRecorder=canRecord&&(isMobile||isStandalone||!SR);
+      if(useRecorder)mb.onclick=()=>listening?stopRecording():startRecording(ta,q,mb);
+      else if(SR)mb.onclick=()=>listening?currentRecognition.stop():startVoice(SR,ta,q,mb);else{mb.disabled=true;document.getElementById('micLabel').textContent='Voice unavailable in this browser';document.getElementById('voiceHint').textContent=q.type==='choice'?'Choose buyer, seller, or both above.':'You can still type your answer below.'}
     }
     function valid(){const q=questions[step];if(q.type==='choice')return !!answers.side;return answers[q.key].trim().length>2}
     function validate(){next.disabled=!valid()}
+    function applySpoken(spoken,q,ta,base){
+      spoken=String(spoken||'').trim();
+      if(q.type==='choice'){const s=spoken.toLowerCase();answers.side=s.includes('both')?'Both':s.includes('seller')?'Seller':s.includes('buyer')?'Buyer':'';document.querySelectorAll('[data-choice]').forEach(b=>{b.classList.toggle('selected',b.dataset.choice===answers.side);b.setAttribute('aria-pressed',b.dataset.choice===answers.side)});if(!answers.side)document.getElementById('voiceHint').textContent='Please say buyer, seller, or both.'}
+      else if(spoken){answers[q.key]=[base,spoken].filter(Boolean).join(' ');if(ta)ta.value=answers[q.key]}
+      validate();
+    }
+    function setMicUI(btn,state,q){
+      const label=document.getElementById('micLabel'),hint=document.getElementById('voiceHint');
+      btn.classList.toggle('listening',state==='recording');btn.disabled=state==='working';
+      btn.setAttribute('aria-pressed',state==='recording'?'true':'false');btn.setAttribute('aria-label',state==='recording'?'Stop recording':'Speak your answer');
+      if(state==='recording'){label.textContent='Listening… Tap to stop';hint.textContent='Speak naturally. Tap the button when you’re done.'}
+      else if(state==='working'){label.textContent='Transcribing…';hint.textContent='One moment while I write that down.'}
+      else{label.textContent='Speak your answer';if(hint)hint.textContent=q.type==='choice'?(answers.side?'':'Tap the microphone and say buyer, seller, or both.'):'Tap the microphone and talk, or type your answer below.'}
+    }
+    function stopRecording(){if(mediaRec&&mediaRec.state==='recording')mediaRec.stop()}
+    async function startRecording(ta,q,btn){
+      if(listening)return;listening=true;
+      let stream;
+      try{stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}})}
+      catch(e){listening=false;document.getElementById('voiceHint').textContent=e&&(e.name==='NotAllowedError'||e.name==='SecurityError')?micBlockedMsg():'I couldn’t reach your microphone. You can type below.';return}
+      if(!btn.isConnected){listening=false;stream.getTracks().forEach(t=>t.stop());return}
+      const types=['audio/mp4','audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus'];
+      const type=window.MediaRecorder.isTypeSupported?types.find(t=>MediaRecorder.isTypeSupported(t))||'':'';
+      let rec;try{rec=new MediaRecorder(stream,type?{mimeType:type,audioBitsPerSecond:32000}:{audioBitsPerSecond:32000})}catch{rec=new MediaRecorder(stream)}
+      const chunks=[],base=q.type==='choice'?'':answers[q.key];mediaRec=rec;discardRecording=false;
+      rec.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data)};
+      rec.onstop=async()=>{
+        clearTimeout(recTimer);stream.getTracks().forEach(t=>t.stop());
+        if(mediaRec===rec)mediaRec=null;
+        if(discardRecording){discardRecording=false;return}
+        listening=false;
+        const blob=new Blob(chunks,{type:(rec.mimeType||type||'audio/mp4').split(';')[0]});
+        if(!blob.size){setMicUI(btn,'idle',q);document.getElementById('voiceHint').textContent='I couldn’t hear that. Tap the microphone to try again.';return}
+        setMicUI(btn,'working',q);
+        try{
+          const r=await fetch('/api/transcribe',{method:'POST',headers:{'Content-Type':blob.type},body:blob});
+          const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||'Transcription failed.');
+          if(!btn.isConnected)return;
+          setMicUI(btn,'idle',q);
+          if(!String(j.text||'').trim()){document.getElementById('voiceHint').textContent='I couldn’t hear that. Tap the microphone to try again.';return}
+          applySpoken(j.text,q,ta,base);
+        }catch(err){if(btn.isConnected){setMicUI(btn,'idle',q);document.getElementById('voiceHint').textContent='I couldn’t transcribe that. Tap the microphone to try again, or type below.'}}
+      };
+      rec.start(1000);setMicUI(btn,'recording',q);
+      recTimer=setTimeout(stopRecording,180000);
+    }
     function startVoice(SR,ta,q,btn){
       const rec=new SR(),base=q.type==='choice'?'':answers[q.key];currentRecognition=rec;rec.lang='en-US';rec.interimResults=true;rec.continuous=true;listening=true;btn.classList.add('listening');btn.setAttribute('aria-label','Stop recording');btn.setAttribute('aria-pressed','true');document.getElementById('micLabel').textContent='Listening… Tap to stop';document.getElementById('voiceHint').textContent='Speak naturally. Tap the button when you’re done.';
       rec.onresult=e=>{let spoken='';for(let i=0;i<e.results.length;i++)spoken+=e.results[i][0].transcript+' ';spoken=spoken.trim();if(q.type==='choice'){const s=spoken.toLowerCase();answers.side=s.includes('both')?'Both':s.includes('seller')?'Seller':s.includes('buyer')?'Buyer':'';document.querySelectorAll('[data-choice]').forEach(b=>{b.classList.toggle('selected',b.dataset.choice===answers.side);b.setAttribute('aria-pressed',b.dataset.choice===answers.side)});if(!answers.side)document.getElementById('voiceHint').textContent='Please say buyer, seller, or both.'}else{answers[q.key]=[base,spoken].filter(Boolean).join(' ');ta.value=answers[q.key]}validate()};

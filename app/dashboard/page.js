@@ -38,6 +38,8 @@ export default function DashboardPage(){
   const metrics=useMemo(()=>Object.fromEntries(Object.keys(metricNames).map(key=>[key,events.filter(e=>e.event_type===key).length])),[events]);
   const baseUrl=typeof window!=="undefined"?window.location.origin:"";
   const publicUrl=profile.slug?`${baseUrl}/l/${profile.slug}`:"Complete your profile to create your link";
+  const installVideos=[{key:"ios",label:"iPhone",src:"/videos/install-iphone.mp4",poster:"/videos/install-iphone.jpg"},{key:"android",label:"Android",src:"/videos/install-android.mp4",poster:"/videos/install-android.jpg"}];
+  const installMessage=`Here's your link to the Review Assistant: ${publicUrl}\n\nAdd it to your phone's home screen so it opens like an app. It takes about 30 seconds:\n• iPhone: ${baseUrl}/videos/install-iphone.mp4\n• Android: ${baseUrl}/videos/install-android.mp4`;
 
   function profilePayload(source){return {user_id:user.id,slug:safeSlug(source.slug||source.full_name),full_name:source.full_name.trim(),company_name:source.company_name.trim(),title:(source.title||"Loan Officer").trim(),email:(source.email||"").trim()||null,phone:(source.phone||"").trim()||null,nmls:source.nmls.trim(),website:(source.website||"").trim()||null,brand_color:source.brand_color||"#173f5f",headshot_url:source.headshot_url||null,logo_url:source.logo_url||null,published:true,updated_at:new Date().toISOString()}}
   function missingProfileField(source){return [["full name",source.full_name],["public URL name",safeSlug(source.slug||source.full_name)],["company",source.company_name],["NMLS number",source.nmls]].find(([,value])=>!String(value||"").trim())?.[0]}
@@ -62,7 +64,7 @@ export default function DashboardPage(){
   }
   async function addCampaign(event){event.preventDefault();if(!campaignLabel.trim()||!profile.user_id)return;setBusy(true);try{const slug=safeSlug(campaignLabel);const{data,error}=await supabase.from("campaigns").insert({profile_id:profile.user_id,label:campaignLabel.trim(),slug}).select().single();if(error)throw error;setCampaigns(c=>[data,...c]);setCampaignLabel("");showMessage("Tracking link created.")}catch(error){showMessage(error.message,"error")}finally{setBusy(false)}}
   async function deleteCampaign(id){if(!confirm("Delete this tracking link? Existing visits will remain in your totals."))return;const{error}=await supabase.from("campaigns").delete().eq("id",id);if(error)showMessage(error.message,"error");else setCampaigns(c=>c.filter(x=>x.id!==id))}
-  async function copy(value){await navigator.clipboard.writeText(value);showMessage("Link copied.")}
+  async function copy(value,label="Link copied."){try{await navigator.clipboard.writeText(value);showMessage(label)}catch{showMessage("Couldn’t copy automatically. Select the text and copy it instead.","error")}}
   async function signOut(){await supabase.auth.signOut();router.replace("/login")}
 
   if(!user)return <main className="admin-shell"><p className="admin-muted">Loading your dashboard…</p></main>;
@@ -75,6 +77,10 @@ export default function DashboardPage(){
       <div className="metric-grid">{["page_view","interview_started","interview_completed","generation_completed"].map(key=><article className="metric" key={key}><strong>{metrics[key]||0}</strong><span>{metricNames[key]}</span></article>)}</div>
       <section className="admin-card"><h2>Engagement actions</h2><div className="action-metrics">{["copy_email","copy_prompts","copy_text","open_email","open_text"].map(key=><div key={key}><span>{metricNames[key]}</span><strong>{metrics[key]||0}</strong></div>)}</div></section>
       <section className="admin-card"><h2>Your public link</h2><p className="admin-muted">Agents can use this link without creating an account.</p><div className="copy-line"><code>{publicUrl}</code>{profile.slug&&<button onClick={()=>copy(publicUrl)}>Copy</button>}</div></section>
+      <section className="admin-card"><h2>Help agents add it to their phone</h2><p className="admin-muted">Send these short videos with your link so agents can open the assistant from their home screen like an app.</p>
+        <div className="install-videos">{installVideos.map(v=><figure className="install-video" key={v.key}><video controls playsInline preload="none" poster={v.poster} src={v.src}/><figcaption><strong>{v.label}</strong><button onClick={()=>copy(`${baseUrl}${v.src}`,`${v.label} video link copied.`)}>Copy video link</button></figcaption></figure>)}</div>
+        {profile.slug?<><h3 className="install-heading">Ready-to-send message</h3><pre className="install-message">{installMessage}</pre><button className="admin-primary" onClick={()=>copy(installMessage,"Message copied.")}>Copy message</button></>:<p className="admin-muted">Complete your branding to get a ready-to-send message with your link.</p>}
+      </section>
     </section>}
     {tab==="profile"&&<form className="admin-card admin-form profile-form" onSubmit={saveProfile}>
       <div><p className="eyebrow">PHASE ONE</p><h1>Your branding</h1><p className="admin-muted">This information appears above the agent’s interview.</p></div>

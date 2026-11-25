@@ -25,6 +25,8 @@
     @keyframes pulse{50%{transform:scale(.94)}}
     @media(max-width:640px){.shell{width:min(100% - 20px,920px);padding:16px 0 28px}.brand{margin:0 6px 14px}.card{border-radius:18px}.setup{padding:34px 20px 28px}.setup-grid{grid-template-columns:1fr}.setup-grid .wide{grid-column:auto}.tone-options{grid-template-columns:1fr}.top{padding:22px 20px 0}.content{padding:34px 20px 28px;min-height:570px}.voice-panel{padding:18px 14px}.mic{min-height:86px}.mic svg{width:56px;height:56px}.choices{grid-template-columns:1fr}.choice{text-align:left;padding:16px}.actions{padding-top:26px}.btn{padding:13px 17px}.results{padding:26px 20px}.results-head{display:block}.restart{margin-top:16px}.result-tools{grid-template-columns:1fr}.tone-select{min-width:0}.output{padding:17px 15px}.output-top{display:block}.button-row{margin-top:12px}.results h1{font-size:1.85rem}}
     @media(min-width:641px){.sponsor{grid-template-columns:68px minmax(0,1fr) auto;gap:16px;padding:14px 18px}.sponsor.no-headshot{grid-template-columns:minmax(0,1fr) auto}.sponsor-headshot{width:68px;height:68px}.sponsor-logo{grid-column:auto;width:124px;height:58px;justify-self:end;margin:0}}
+    .install{display:none;align-items:center;gap:12px;background:#fff;border:1px solid #dbe5f3;border-radius:18px;padding:12px 14px;margin:0 0 14px;box-shadow:0 10px 26px rgba(22,39,72,.08)}.install.show{display:flex}.install img{width:44px;height:44px;border-radius:11px;flex:none}.install-text{flex:1;min-width:0}.install-text strong{display:block;font-size:.95rem;letter-spacing:-.01em}.install-text span{display:block;color:var(--muted);font-size:.8rem;margin-top:2px}.install-watch{border:0;background:var(--navy);color:#fff;font-weight:700;font-size:.85rem;border-radius:999px;padding:9px 14px;white-space:nowrap}.install-close{border:0;background:none;color:var(--muted);font-size:1.4rem;line-height:1;padding:4px 2px 6px}
+    .install-modal{position:fixed;inset:0;z-index:1000;background:rgba(10,20,35,.72);display:none;align-items:center;justify-content:center;padding:16px}.install-modal.show{display:flex}.install-box{background:#fff;border-radius:22px;padding:14px;width:min(100%,380px);max-height:100%;display:flex;flex-direction:column;gap:10px}.install-box video{width:100%;max-height:calc(100vh - 150px);border-radius:14px;background:#000;aspect-ratio:9/16;object-fit:contain}.install-actions{display:flex;justify-content:space-between;gap:10px}.install-actions button{flex:1;border-radius:12px;padding:11px;font-weight:700;border:1px solid var(--line);background:#fff;color:var(--ink)}.install-actions .install-switch{border:0;background:none;color:var(--blue);font-weight:600;font-size:.85rem}
   </style>
 </head>
 <body>
@@ -35,6 +37,12 @@
       <div class="sponsor-copy"><span class="sponsor-kicker">BROUGHT TO YOU BY</span><strong id="sponsorName"></strong><span id="sponsorCompany"></span><span id="sponsorNmls" hidden></span><div class="sponsor-contact"><a id="sponsorPhone" hidden></a><a id="sponsorEmail" hidden></a></div></div>
       <img class="sponsor-logo" id="sponsorLogo" alt="Company logo" />
     </aside>
+    <div class="install" id="installBanner" role="region" aria-label="Add to home screen">
+      <img src="/apple-touch-icon.png" alt="" />
+      <div class="install-text"><strong>Add this app to your home screen</strong><span>One tap to open it next time. Takes 30 seconds.</span></div>
+      <button class="install-watch" id="installWatch" type="button">Show me</button>
+      <button class="install-close" id="installClose" type="button" aria-label="Not now">×</button>
+    </div>
     <section class="card" id="setup">
       <div class="setup">
         <span class="voice-first">Voice works best</span>
@@ -75,6 +83,12 @@
     </section>
     <p class="sponsor-footer" id="sponsorFooter"></p>
   </main>
+  <div class="install-modal" id="installModal" role="dialog" aria-modal="true" aria-label="How to add to your home screen">
+    <div class="install-box">
+      <video id="installVideo" controls playsinline preload="none"></video>
+      <div class="install-actions"><button class="install-switch" id="installSwitch" type="button"></button><button id="installDone" type="button">Close</button></div>
+    </div>
+  </div>
   <script>
     const branded={profile:null,campaign:null};
     let sessionId;
@@ -236,6 +250,25 @@
     document.querySelectorAll('[data-tone]').forEach(btn=>btn.onclick=()=>{profile.tone=btn.dataset.tone;document.querySelectorAll('[data-tone]').forEach(b=>b.classList.toggle('selected',b===btn))});
     document.getElementById('startBtn').onclick=()=>{profile.agentName=document.getElementById('agentName').value.trim();profile.clientNames=document.getElementById('clientNames').value.trim();profile.reviewLink=document.getElementById('setupReviewLink').value.trim();const error=document.getElementById('setupError');if(!profile.agentName){error.textContent='Please add your first name.';error.classList.add('show');return}if(!validReviewLink(profile.reviewLink)){error.textContent='Please enter a complete review link beginning with https://';error.classList.add('show');return}error.classList.remove('show');document.getElementById('reviewLink').value=profile.reviewLink;document.getElementById('resultTone').value=profile.tone;document.getElementById('setup').style.display='none';document.getElementById('interview').style.display='block';track('interview_started');render();window.scrollTo(0,0)};
     document.getElementById('restartBtn').onclick=()=>{if(!confirm('Start over and clear these answers?'))return;Object.keys(answers).forEach(k=>answers[k]='');clarified.clear();step=0;injectedLink='';document.getElementById('results').style.display='none';document.getElementById('setup').style.display='block';window.scrollTo(0,0)};
+    // "Add to home screen" helper: phones only, hidden once running from the home-screen icon or dismissed.
+    (function(){
+      const isIOS=/iPhone|iPad|iPod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+      const isAndroid=/Android/i.test(navigator.userAgent);
+      const KEY='installBannerDismissedAt',banner=document.getElementById('installBanner'),modal=document.getElementById('installModal'),video=document.getElementById('installVideo'),sw=document.getElementById('installSwitch');
+      const VIDEOS={ios:{src:'/videos/install-iphone.mp4',poster:'/videos/install-iphone.jpg',other:'Using Android instead?'},android:{src:'/videos/install-android.mp4',poster:'/videos/install-android.jpg',other:'Using an iPhone instead?'}};
+      let current=isAndroid?'android':'ios';
+      let dismissed=false;try{const at=Number(localStorage.getItem(KEY)||0);dismissed=at&&Date.now()-at<14*864e5}catch{}
+      if((isIOS||isAndroid)&&!isStandalone&&!dismissed)banner.classList.add('show');
+      function load(kind){current=kind;video.src=VIDEOS[kind].src;video.poster=VIDEOS[kind].poster;sw.textContent=VIDEOS[kind].other}
+      function open(){load(current);modal.classList.add('show');video.play().catch(()=>{})}
+      function close(){video.pause();modal.classList.remove('show')}
+      document.getElementById('installWatch').onclick=open;
+      document.getElementById('installClose').onclick=()=>{banner.classList.remove('show');try{localStorage.setItem(KEY,String(Date.now()))}catch{}};
+      document.getElementById('installDone').onclick=close;
+      modal.addEventListener('click',e=>{if(e.target===modal)close()});
+      sw.onclick=()=>{load(current==='ios'?'android':'ios');video.play().catch(()=>{})};
+      document.getElementById('startBtn').addEventListener('click',()=>{if(document.getElementById('setup').style.display==='none')banner.classList.remove('show')});
+    })();
     loadBranding();
   </script>
 </body>
